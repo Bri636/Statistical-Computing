@@ -1,0 +1,115 @@
+---
+title: "Homework 8"
+author: "Brian Hsu"
+date: "2022-11-17"
+output: html_document
+---
+
+## Simulating from a Posterior Mixture Distribution
+
+Example for applying MCMC independence chain algorithm towards a simple Bayesian model. My goal is to simulate data from a mixture distribution:
+
+$\delta N(7, 0.5^2) + (1 - \delta) N(10, 0.5^2)$
+
+with $\delta = 0.7$. Then I will simulate from the posterior distribution of $\delta$ using my simulated data from the mixture distribution. For this case, I am assuming that $\delta$ is unknown and that the prior distribution is $p(\delta) \sim unif[0,1]$.
+
+For the first part, we can sample 1000 realizations $y_1, y_2, ...y_{1000}$ from our mixture distribution. To do this, we can sample a variable $Z \sim Binom(n = 1, p = 0.7)$ 1000 times. Each time we get a success, or Z = 1, we sample from $(\delta)N(7, 0.5^2)$. Each time we get a failure, or Z = 0, we sample from $(1 - \delta) N(10, 0.5^2)$ for $\delta = 0.7$. This will generate our 1000 realizations from the mixture distribution.
+
+```{r}
+# set.seed
+set.seed(0)
+# generating a z ~ binom(n = 1, p = 0.7) run 200 times
+z = rbinom(200, 1, 0.7)
+# sampling 200 realizations from mixture distribution 
+y = c(rnorm(200, 7, 0.5)[z==1], rnorm(200, 10, 0.5)[z==0])
+
+# histogram of our 200 realizations y1...y200
+par(mfrow=c(1,1))
+x=seq(5,14,by=.01)
+d=.7*dnorm(x,7,.5) + .3*dnorm(x,10,.5)
+hist(y,breaks=25,freq=FALSE,main="Histogram",ylab="Density", ylim = c(0,0.8))
+points(x,d,type="l")
+
+
+```
+
+Our y sample from the mixture distribution seems to be fairly close in shape with what we expect for the mixture distribution.
+
+## MCMC Independence Chain
+
+Now, we implement an independence chain MCMC procedure to simulate from the posterior distribution of δ, using my simulated realizations $y_1, y_2, ...y_{1000}$ . We have the posterior density $p(\delta | y_1....y_{200})$ and our prior distribution $p(\delta) \sim unif[0,1]$. We can choose our proposal distribution to be $g \sim Beta(1,1)$. In addition, we are working with an independence chain. Therefore, out M-H Algorithm Ratio would be:
+
+$R(\delta^{(t)}, \delta^*) = \frac{f(\delta^*)g(\delta^{(t)})}{g(\delta^*)f(\delta^{(t)})}$
+
+where the target distribution is $f(\delta) = L(\delta|y)\pi(\delta)$ and the proposal distribution is $g(\delta)\sim Beta(1, 1)$
+
+Our steps for our algorithm are as follows:
+
+1.) Sample $\delta^{(0)} \sim Beta(1,1) = U(0,1)$
+
+2.) Let $\delta^{(t)} = \delta^{(t)}$. Sample a candidate value $\delta^*$ from proposal distribution $g(\cdot|\delta^{(t)}) = g(\cdot)$:
+
+If $\delta^* < 0$, then let $\delta^{(t+1)} = \delta^{(t)}$. Otherwise, move to step 3.
+
+3.) Find M-H ratio $R(\delta^{(t)}, \delta^*) = \frac{L(\delta^*|y)\pi(\delta^*)g(\delta^{(t)})}{L(\delta^{(t)}|y)\pi(\delta^{(t)})g(\delta^*)}$
+
+4.) Accept $\delta^*$ with $probability = min[R(\delta^{(t)}, \delta^*), 1]$:
+
+If accepted, then $\delta^{(t+1)} = \delta^*$. Otherwise, $\delta^{(t+1)} = \delta^{(t)}$
+
+5.) Repeat steps 1-4
+
+```{r}
+# setting seed, number of iterations
+set.seed(0)
+n = 10000
+x.val1 = NULL
+x=seq(5,14,by=.01)
+##FUNCTIONS
+# f(x) function
+f = function(x){prod(x*dnorm(y,7,0.5) + (1-x)*dnorm(y,10,0.5))}
+# M-H ratio
+R = function(xt,x){f(x)*g(xt)/(f(xt)*g(x))}
+
+## MAIN
+# proposal function
+g = function(x){dbeta(x,1,1)}
+# initial delta_0 value 
+x.val1[1] = rbeta(1,1,1)
+
+# M-H algorithm
+for(i in 1:n){
+   xt = x.val1[i]
+   x = rbeta(1,1,1)
+   p = min(R(xt,x),1)
+   d = rbinom(1,1,p)
+   x.val1[i+1] = x*d + xt*(1-d)
+}
+mean(x.val1[201:(n+1)])
+summary(x.val1[201:(n+1)])
+
+```
+
+The mean $\delta$ is 0.6853.
+
+```{r}
+# path plot for delta
+plot(x.val1[201:(n+1)], ylim=c(0,1), type="l", ylab = "Delta", xlab = "t")
+title("Sample Path for Beta(1,1) Proposal Distribution")
+```
+
+From our graph, the Markov chain moves quickly away from its starting value and seems easily able to sample values from all portions of the parameter space supported by the posterior for $\delta$.
+
+```{r}
+# histogram plot
+hist(x.val1[201:(n+1)],breaks=25,xlab="delta", xlim = c(0.5, 0.85),ylim=c(0,1600),main="Hist. for Beta(1,1) Proposal Dist.")
+```
+
+Based on the histogram plot, the sample of delta generated has a mean fairly close to the true value of $\delta = 0.7$
+
+```{r}
+acf(x.val1[201:(n+1)], main = "ACF Plot for Beta(1,1) Proposal Dist.")
+
+```
+
+From the ACF plot, there is a decay in the correlation function as the iteration between lags increases. This suggests that our proposal distribution seems to create good mixing in our MCMC algorithm.
